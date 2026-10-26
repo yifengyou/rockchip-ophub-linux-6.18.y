@@ -296,11 +296,27 @@
 	 * matching compatible ("realtek,rtl8367rb") is added there.
 	 * Each port has a fixed label and local-mac-address. */
 	switch1: switch1 {
-		compatible = "realtek,rtl8367rb";
+		/* fnos ships the upstream rtl8365mb.ko module whose
+		 * of_match_table only lists "realtek,rtl8365mb" (it does NOT
+		 * list "realtek,rtl8367rb"). Use "realtek,rtl8365mb" so the
+		 * stock module probes this node; the driver's rtl8365mb_detect()
+		 * still auto-detects the actual RTL8367RB-VB chip by reading
+		 * the chip id over SMI (strings "RTL8367S"/"RTL8367RB-VB" are
+		 * built into the module), exactly like it does for switch0
+		 * which is also an RTL8367S behind the rtl8365mb compatible. */
+		compatible = "realtek,rtl8365mb";
 		mdc-gpios = <&gpio4 RK_PA4 GPIO_ACTIVE_HIGH>;
 		mdio-gpios = <&gpio4 RK_PA5 GPIO_ACTIVE_HIGH>;
 		reset-gpios = <&gpio4 RK_PB7 GPIO_ACTIVE_LOW>;
-		dsa,member = <1 1>;
+		/* Each switch is the sole member of its own DSA tree, so both
+		 * get ds->index = 0. This is required because fnos ships the
+		 * upstream tag_rtl8_4.ko which hardcodes
+		 * dsa_conduit_find_user(dev, 0, port) -- device index 0. With
+		 * dsa,member = <1 1> (index 1) the RX path could never resolve
+		 * the user port and logged "could not find user for port N"
+		 * for every ingress frame on end0. Using <1 0> makes switch1
+		 * index 0 in tree 1, so the hardcoded lookup succeeds. */
+		dsa,member = <1 0>;
 
 		ports {
 			#address-cells = <1>;
