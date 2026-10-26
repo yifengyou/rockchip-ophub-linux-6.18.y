@@ -851,30 +851,20 @@
 
 &pcie3x4 {
 	/* Enable the 4-lane PCIe 3.0 controller for the M.2 NVMe slot.
-	 * All overrides below match the official factory firmware DTB
-	 * (factory/boot.img-unpack rk-kernel.dtb, model "Rockchip RK3588
-	 * NVR DEMO LP4 V10 S60 Board") to ensure the stock fnos kernel
-	 * driver (pcie-dw-plat via "snps,dw-pcie") probes correctly.
 	 *
-	 * CRITICAL: the upstream dtsi uses compatible "rockchip,rk3568-pcie"
-	 * which binds the pcie-dw-rockchip driver; that driver expects
-	 * different reg-names/resets and caused a boot hang. The factory
-	 * DTB uses "snps,dw-pcie" which binds the generic pcie-dw-plat
-	 * driver — that is what we must match. */
-	compatible = "rockchip,rk3588-pcie", "snps,dw-pcie";
-	reg-names = "pcie-apb", "pcie-dbi", "config";
-	reset-names = "pcie", "periph";
-	rockchip,pipe-grf = <&php_grf>;
-	num-ib-windows = <16>;
-	num-ob-windows = <16>;
-	num-viewport = <8>;
-	/* The upstream dtsi adds iommu-map referencing mmu600_pcie which
-	 * we keep disabled; remove it by overriding to empty (the factory
-	 * DTB has no iommu-map at all). */
+	 * The fnos kernel has both pcie-dw-rockchip (matches
+	 * "rockchip,rk3568-pcie") and pcie-dw-plat (matches "snps,dw-pcie").
+	 * We use the rockchip-specific driver which handles the RK3588 PCIe
+	 * controller correctly (pipe-grf, perst, etc).
+	 *
+	 * The upstream dtsi already provides the correct reg-names ("dbi",
+	 * "apb", "config"), clocks, resets, phys, msi-map. We only need to:
+	 *   - remove iommu-map (references disabled mmu600_pcie → -EINVAL)
+	 *   - add board-specific reset-gpios, vpcie3v3-supply, pinctrl
+	 *   - add rockchip,pipe-grf (needed by pcie-dw-rockchip driver)
+	 */
 	/delete-property/ iommu-map;
-	/* Board-specific GPIO and supply (same as factory DTB):
-	 *   reset-gpios   = gpio4 RK_PC6 (PERST#)
-	 *   vpcie3v3-supply = vcc3v3_pcie30 (gpio2 RK_PC5 enable) */
+	rockchip,pipe-grf = <&php_grf>;
 	reset-gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_HIGH>;
 	vpcie3v3-supply = <&vcc3v3_pcie30>;
 	pinctrl-names = "default";
