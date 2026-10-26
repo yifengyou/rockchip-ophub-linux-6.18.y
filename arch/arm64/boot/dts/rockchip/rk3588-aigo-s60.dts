@@ -527,7 +527,15 @@
 };
 
 &gpu {
-	status = "disabled";
+	/* fnos ships Rockchip's vendor mali driver (rkgpu_bifrost_csf.ko)
+	 * whose of_match_table lists "rockchip,rk3588-mali-csf" and
+	 * "arm,mali-valhall". The upstream dtsi compatible
+	 * "arm,mali-valhall-csf" is NOT in that table, so add the vendor
+	 * string first to ensure the stock module matches. */
+	compatible = "rockchip,rk3588-mali-csf", "rockchip,rk3588-mali",
+		     "arm,mali-valhall-csf";
+	mali-supply = <&vdd_gpu_s0>;
+	status = "okay";
 };
 
 /* Re-enable ITS to match the official 6.1 BSP. The official kernel runs
@@ -916,13 +924,113 @@
 	pinctrl-names = "default";
 };
 
-/* NPU disabled — headless recovery doesn't need it */
-&rknn_core_0 { status = "disabled"; };
-&rknn_core_1 { status = "disabled"; };
-&rknn_core_2 { status = "disabled"; };
+/* ---- NPU ----
+ * fnos ships Rockchip's vendor rknpu.ko whose of_match_table lists
+ * "rockchip,rk3588-rknpu" (a SINGLE node covering all 3 cores), NOT the
+ * upstream "rockchip,rk3588-rknn-core" (three separate nodes).
+ *
+ * Strategy: repurpose the existing rknn_core_0 node (already at
+ * 0xfdab0000) by overriding its compatible/properties to match the
+ * vendor driver, delete the other two core nodes, and disable all
+ * three upstream mmu nodes (keep them for the phandle reference but
+ * never probe).
+ *
+ * NOTE on iommu: the BSP uses "rockchip,iommu-v2" for the NPU iommu,
+ * but fnos has no driver for that compatible (only the upstream
+ * "rockchip,rk3588-iommu"). If the upstream rockchip-iommu driver
+ * probes the NPU iommu, it request_mem_region's 0xfdab9000, which
+ * overlaps the NPU's 64KB reg window (0xfdab0000-0xfdabffff) and
+ * produces -EBUSY. Keep rknn_mmu_0 status="disabled" so the iommu
+ * driver never probes; the rknpu driver then runs in non-iommu mode
+ * ("using non-iommu mode"), which is exactly how the official BSP
+ * behaves on fnos (its iommu-v2 driver simply never matched).
+ */
+/delete-node/ &rknn_core_1;
+/delete-node/ &rknn_core_2;
+
+/* Keep rknn_mmu_* nodes present (so the iommus phandle resolves) but
+ * disabled, so the rockchip-iommu driver never probes them. */
 &rknn_mmu_0 { status = "disabled"; };
 &rknn_mmu_1 { status = "disabled"; };
 &rknn_mmu_2 { status = "disabled"; };
+
+/* Repurpose rknn_core_0 (npu@fdab0000) as the vendor-style single NPU
+ * node. Override compatible, expand reg to cover all 3 cores, add the
+ * 2nd/3rd interrupts, 3 power domains, rknpu-supply for DVFS. */
+&rknn_core_0 {
+	compatible = "rockchip,rk3588-rknpu";
+	reg = <0x0 0xfdab0000 0x0 0x10000>,
+	      <0x0 0xfdac0000 0x0 0x10000>,
+	      <0x0 0xfdad0000 0x0 0x10000>;
+	reg-names = "pc", "cna", "core";
+	interrupts = <GIC_SPI 110 IRQ_TYPE_LEVEL_HIGH 0>,
+		     <GIC_SPI 111 IRQ_TYPE_LEVEL_HIGH 0>,
+		     <GIC_SPI 112 IRQ_TYPE_LEVEL_HIGH 0>;
+	interrupt-names = "npu0_irq", "npu1_irq", "npu2_irq";
+	clocks = <&cru ACLK_NPU0>, <&cru ACLK_NPU1>,
+		 <&cru ACLK_NPU2>, <&cru HCLK_NPU0>,
+		 <&cru HCLK_NPU1>, <&cru HCLK_NPU2>,
+		 <&scmi_clk SCMI_CLK_NPU>, <&cru PCLK_NPU_ROOT>;
+	clock-names = "aclk0", "aclk1", "aclk2",
+		      "hclk0", "hclk1", "hclk2",
+		      "npu", "pclk";
+	resets = <&cru SRST_A_RKNN0>, <&cru SRST_A_RKNN1>,
+		 <&cru SRST_A_RKNN2>, <&cru SRST_H_RKNN0>,
+		 <&cru SRST_H_RKNN1>, <&cru SRST_H_RKNN2>;
+	reset-names = "srst_a0", "srst_a1", "srst_a2",
+		      "srst_h0", "srst_h1", "srst_h2";
+	power-domains = <&power RK3588_PD_NPUTOP>,
+			<&power RK3588_PD_NPU1>,
+			<&power RK3588_PD_NPU2>;
+	power-domain-names = "npu0", "npu1", "npu2";
+	operating-points-v2 = <&npu_opp_table>;
+	/* iommus points at the (disabled) rknn_mmu_0. Because the mmu node
+	 * is status="disabled", the iommu driver never probes and the rknpu
+	 * driver falls back to non-iommu mode. Keeping the reference avoids
+	 * a DTC phandle error. */
+	iommus = <&rknn_mmu_0>;
+	rknpu-supply = <&vdd_npu_s0>;
+	status = "okay";
+};
+
+&{/} {
+	npu_opp_table: opp-table-npu {
+		compatible = "operating-points-v2";
+
+		opp-300000000 {
+			opp-hz = /bits/ 64 <300000000>;
+			opp-microvolt = <700000 700000 850000>;
+		};
+		opp-400000000 {
+			opp-hz = /bits/ 64 <400000000>;
+			opp-microvolt = <700000 700000 850000>;
+		};
+		opp-500000000 {
+			opp-hz = /bits/ 64 <500000000>;
+			opp-microvolt = <700000 700000 850000>;
+		};
+		opp-600000000 {
+			opp-hz = /bits/ 64 <600000000>;
+			opp-microvolt = <700000 700000 850000>;
+		};
+		opp-700000000 {
+			opp-hz = /bits/ 64 <700000000>;
+			opp-microvolt = <750000 750000 850000>;
+		};
+		opp-800000000 {
+			opp-hz = /bits/ 64 <800000000>;
+			opp-microvolt = <800000 800000 850000>;
+		};
+		opp-900000000 {
+			opp-hz = /bits/ 64 <900000000>;
+			opp-microvolt = <850000 850000 850000>;
+		};
+		opp-1000000000 {
+			opp-hz = /bits/ 64 <1000000000>;
+			opp-microvolt = <900000 900000 950000>;
+		};
+	};
+};
 
 &saradc {
 	vref-supply = <&avcc_1v8_s0>;
