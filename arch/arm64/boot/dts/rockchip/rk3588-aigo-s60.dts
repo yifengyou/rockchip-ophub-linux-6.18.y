@@ -843,11 +843,43 @@
 };
 
 &pcie30phy {
-	status = "disabled";
+	/* Match the official 6.1 BSP: phymode = <4> means the combo PHY is
+	 * wired to the pcie3x4 controller (4-lane PCIe 3.0). */
+	rockchip,pcie30-phymode = <4>;
+	status = "okay";
 };
 
 &pcie3x4 {
-	status = "disabled";
+	/* Enable the 4-lane PCIe 3.0 controller for the M.2 NVMe slot.
+	 * All overrides below match the official factory firmware DTB
+	 * (factory/boot.img-unpack rk-kernel.dtb, model "Rockchip RK3588
+	 * NVR DEMO LP4 V10 S60 Board") to ensure the stock fnos kernel
+	 * driver (pcie-dw-plat via "snps,dw-pcie") probes correctly.
+	 *
+	 * CRITICAL: the upstream dtsi uses compatible "rockchip,rk3568-pcie"
+	 * which binds the pcie-dw-rockchip driver; that driver expects
+	 * different reg-names/resets and caused a boot hang. The factory
+	 * DTB uses "snps,dw-pcie" which binds the generic pcie-dw-plat
+	 * driver — that is what we must match. */
+	compatible = "rockchip,rk3588-pcie", "snps,dw-pcie";
+	reg-names = "pcie-apb", "pcie-dbi", "config";
+	reset-names = "pcie", "periph";
+	rockchip,pipe-grf = <&php_grf>;
+	num-ib-windows = <16>;
+	num-ob-windows = <16>;
+	num-viewport = <8>;
+	/* The upstream dtsi adds iommu-map referencing mmu600_pcie which
+	 * we keep disabled; remove it by overriding to empty (the factory
+	 * DTB has no iommu-map at all). */
+	/delete-property/ iommu-map;
+	/* Board-specific GPIO and supply (same as factory DTB):
+	 *   reset-gpios   = gpio4 RK_PC6 (PERST#)
+	 *   vpcie3v3-supply = vcc3v3_pcie30 (gpio2 RK_PC5 enable) */
+	reset-gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_HIGH>;
+	vpcie3v3-supply = <&vcc3v3_pcie30>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie30x4_rst>;
+	status = "okay";
 };
 
 &pinctrl {
@@ -874,6 +906,12 @@
 
 		pcie_m2_0_pwren: pcie-m20-pwren {
 			rockchip,pins = <2 RK_PC5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		/* PERST# for the M.2 NVMe slot (pcie3x4), matching the
+		 * official factory firmware: gpio4 RK_PC6. */
+		pcie30x4_rst: pcie30x4-rst {
+			rockchip,pins = <4 RK_PC6 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 
 		wifi_poweren: wifi-poweren {
@@ -1402,22 +1440,30 @@
 
 /* All USB disabled — headless recovery doesn't need USB.
  * Also USB controllers use MSI via ITS which hangs on RK3588001 erratum. */
-&u2phy0 { status = "disabled"; };
-&u2phy0_otg { status = "disabled"; };
+/* USB — match the official factory firmware. Enable u2phy0/2/3 and the
+ * ehci/ohci host controllers for the USB-A ports. The OTG controller
+ * (usb_host0_xhci) is enabled in otg mode with usb-role-switch.
+ * u2phy1 and usbdp_phy1 stay disabled (factory firmware disables them). */
+&u2phy0 { status = "okay"; };
+&u2phy0_otg { status = "okay"; };
+&u2phy2 { status = "okay"; };
+&u2phy2_host { status = "okay"; };
+&u2phy3 { status = "okay"; };
+&u2phy3_host { status = "okay"; };
+&usbdp_phy0 { status = "okay"; };
+&usbdp_phy1 { status = "disabled"; };
 &u2phy1 { status = "disabled"; };
 &u2phy1_otg { status = "disabled"; };
-&u2phy2 { status = "disabled"; };
-&u2phy2_host { status = "disabled"; };
-&u2phy3 { status = "disabled"; };
-&u2phy3_host { status = "disabled"; };
-&usbdp_phy0 { status = "disabled"; };
-&usbdp_phy1 { status = "disabled"; };
-&usb_host0_ehci { status = "disabled"; };
-&usb_host0_ohci { status = "disabled"; };
-&usb_host0_xhci { status = "disabled"; };
+&usb_host0_ehci { status = "okay"; };
+&usb_host0_ohci { status = "okay"; };
+&usb_host0_xhci {
+	dr_mode = "otg";
+	usb-role-switch;
+	status = "okay";
+};
+&usb_host1_ehci { status = "okay"; };
+&usb_host1_ohci { status = "okay"; };
 &usb_host1_xhci { status = "disabled"; };
-&usb_host1_ehci { status = "disabled"; };
-&usb_host1_ohci { status = "disabled"; };
 &usb_host2_xhci { status = "disabled"; };
 
 /* VOP/display disabled — headless recovery */
